@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCADA CONTROL PANEL</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --panel-bg: #121212;
+            --border-color: #333333;
+            --text-color: #e0e0e0;
+            --accent-color: #00bcd4;
+            --success-color: #00ff00;
+            --warning-color: #ffa500;
+            --danger-color: #ff0000;
+            --grid-line: #1a1a1a;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 10px;
+        }
+
+        /* SCADA HEADER */
+        .scada-header {
+            background-color: var(--panel-bg);
+            border: 2px solid var(--border-color);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .scada-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: var(--accent-color);
+            text-transform: uppercase;
+        }
+
+        .system-status {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: var(--success-color);
+            border: 1px solid var(--success-color);
+            padding: 5px 10px;
+        }
+
+        /* GRID LAYOUT */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 15px;
+        }
+
+        /* ASSET PANELS */
+        .scada-panel {
+            background-color: var(--panel-bg);
+            border: 2px solid var(--border-color);
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            background-color: #1f1f1f;
+            color: white;
+            padding: 8px 15px;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-weight: bold;
+            font-size: 1.1rem;
+            text-transform: uppercase;
+        }
+
+        .status-indicator {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background-color: #333;
+            border: 2px solid #555;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.8);
+        }
+
+        .status-indicator.NORMAL {
+            background-color: var(--success-color);
+            box-shadow: 0 0 10px var(--success-color);
+        }
+
+        .status-indicator.WARNING {
+            background-color: var(--warning-color);
+            box-shadow: 0 0 10px var(--warning-color);
+        }
+
+        .status-indicator.CRITICAL {
+            background-color: var(--danger-color);
+            box-shadow: 0 0 10px var(--danger-color);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        .panel-body {
+            padding: 15px;
+        }
+
+        /* DATA TABLE STYLE */
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--grid-line);
+            padding-bottom: 4px;
+        }
+
+        .data-label {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .data-value {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .data-value.real {
+            color: var(--text-color);
+        }
+
+        .data-value.expected {
+            color: var(--accent-color);
+        }
+
+        /* RECOMMENDATION BOX */
+        .recommendation-box {
+            margin-top: 15px;
+            border: 1px solid #333;
+            background-color: #0a0a0a;
+            padding: 10px;
+            color: var(--text-color);
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .recommendation-box.CRITICAL {
+            border-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .recommendation-box.WARNING {
+            border-color: var(--warning-color);
+            color: var(--warning-color);
+        }
+
+        .recommendation-box.NORMAL {
+            border-color: #333;
+            color: #555;
+        }
+
+        .rec-label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+            text-decoration: underline;
+        }
+
+        /* CHARTS */
+        .chart-wrapper {
+            background-color: #050505;
+            border: 1px solid #333;
+            height: 200px;
+            margin-top: 15px;
+            padding: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="scada-header">
+        <div class="scada-title">Power Grid Oversight | Digital Twin</div>
+        <div class="system-status">SYSTEM ONLINE</div>
+    </div>
+
+    <div id="dashboard" class="dashboard-grid">
+        <!-- Panels injected via JS -->
+    </div>
+
+    <script>
+        const chartInstances = {};
+        const MAX_POINTS = 50;
+        const chartData = {};
+
+        function initChart(canvasId, assetId) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            chartData[assetId] = { labels: [], real: [], expected: [] };
+
+            // Prefill
+            for (let i = 0; i < MAX_POINTS; i++) {
+                chartData[assetId].labels.push('');
+                chartData[assetId].real.push(null);
+                chartData[assetId].expected.push(null);
+            }
+
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData[assetId].labels,
+                    datasets: [
+                        {
+                            label: 'MODEL EXPECTATION',
+                            borderColor: '#00bcd4', // Cyan
+                            borderWidth: 1,
+                            borderDash: [4, 4],
+                            pointRadius: 0,
+                            data: chartData[assetId].expected,
+                            fill: false
+                        },
+                        {
+                            label: 'SENSOR REAL-TIME',
+                            borderColor: '#00ff00', // Green
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            data: chartData[assetId].real,
+                            fill: false,
+                            stepped: true // More industrial look
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { labels: { color: '#888', font: { family: 'Courier New' } } }
+                    },
+                    scales: {
+                        x: { display: false, grid: { color: '#1a1a1a' } },
+                        y: {
+                            grid: { color: '#1a1a1a' },
+                            ticks: { color: '#888', font: { family: 'Courier New' } }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function updateData() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                render(data);
+            } catch (e) {
+                console.error("Link Failure", e);
+            }
+        }
+
+        function render(assets) {
+            const container = document.getElementById('dashboard');
+
+            if (container.children.length === 0) {
+                // Initialize Panels
+                assets.forEach(asset => {
+                    const panel = document.createElement('div');
+                    panel.className = 'scada-panel';
+                    panel.innerHTML = `
+                        <div class="panel-header">
+                            <span class="panel-title">${asset.name}</span>
+                            <div class="status-indicator" id="ind-${asset.id}"></div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="data-row">
+                                <span class="data-label">ASSET TYPE</span>
+                                <span class="data-value">${asset.type}</span>
+                            </div>
+                            <div class="data-row">
+                                <span class="data-label">RATED VOLTAGE</span>
+                                <span class="data-value">${asset.expected_value} V (NOM)</span>
+                            </div>
+                            <div class="data-row">
+                                <span class="data-label">REAL-TIME SENSOR</span>
+                                <span class="data-value real" id="val-${asset.id}">0.00 V</span>
+                            </div>
+                            <div class="data-row">
+                                <span class="data-label">TWIN EXPECTED</span>
+                                <span class="data-value expected" id="exp-${asset.id}">0.00 V</span>
+                            </div>
+                             <div class="data-row">
+                                <span class="data-label">CURRENT LOAD</span>
+                                <span class="data-value" id="load-${asset.id}">0.0 A</span>
+                            </div>
+
+                            <div class="chart-wrapper">
+                                <canvas id="chart-${asset.id}"></canvas>
+                            </div>
+
+                            <div class="recommendation-box" id="rec-${asset.id}">
+                                <span class="rec-label">ENGINEERING ADVISORY:</span>
+                                <span id="rec-text-${asset.id}">Initializing...</span>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(panel);
+                    chartInstances[asset.id] = initChart(`chart-${asset.id}`, asset.id);
+                });
+            }
+
+            // Update
+            assets.forEach(asset => {
+                // Values
+                document.getElementById(`val-${asset.id}`).textContent = asset.real_value.toFixed(2) + " V";
+                document.getElementById(`exp-${asset.id}`).textContent = asset.expected_value.toFixed(2) + " V";
+                document.getElementById(`load-${asset.id}`).textContent = asset.load_amps.toFixed(1) + " A";
+
+                // Indicators & Styles
+                const ind = document.getElementById(`ind-${asset.id}`);
+                const recBox = document.getElementById(`rec-${asset.id}`);
+                const recText = document.getElementById(`rec-text-${asset.id}`);
+
+                ind.className = `status-indicator ${asset.health_status}`;
+                recBox.className = `recommendation-box ${asset.health_status}`;
+                recText.textContent = asset.recommendation.toUpperCase();
+
+                // Chart
+                const chart = chartInstances[asset.id];
+                const cData = chartData[asset.id];
+
+                cData.real.push(asset.real_value);
+                cData.expected.push(asset.expected_value);
+                cData.real.shift();
+                cData.expected.shift();
+
+                // Color overrides
+                if (asset.health_status === 'CRITICAL') {
+                    chart.data.datasets[1].borderColor = '#ff0000'; // Red
+                } else if (asset.health_status === 'WARNING') {
+                    chart.data.datasets[1].borderColor = '#ffa500'; // Orange
+                } else {
+                    chart.data.datasets[1].borderColor = '#00ff00'; // Green
+                }
+
+                chart.update();
+            });
+        }
+
+        setInterval(updateData, 1000); // 1Hz Refresh
+        updateData();
+
+    </script>
+</body>
+
+</html>
