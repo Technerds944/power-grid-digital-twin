@@ -71,6 +71,22 @@ class DigitalTwinModel:
         
         return "Anomaly Detected. Manual Inspection Required."
 
+    @staticmethod
+    def analyze_home_iot(voltage: float, current: float) -> Tuple[str, str]:
+        """
+        Analyzes Smart Home telemetry for safety & efficiency.
+        """
+        # Preventive Logic: Surge Protection
+        if voltage > 255.0:
+            return "PROTECTION ACTIVE", "Surge Detected. Power Cut to Save Appliances."
+        
+        # Predictive Logic: Appliance Health
+        # Normal voltage but high current indicates motor strain (e.g., AC compressor)
+        if current > 15.0:
+            return "WARNING", "High Current. Check AC Compressor Health."
+
+        return "NORMAL", "Home System Nominal."
+
 # ==========================================
 # MODULES (Generation, Transmission, Distribution)
 # ==========================================
@@ -97,6 +113,14 @@ class DistributionModule:
         """Simulates load on a feeder (Amps)."""
         return 30.0 + random.uniform(-2.0, 2.0)
 
+class SmartHomeModule:
+    """Module for residential load logic."""
+    @staticmethod
+    def get_load_profile() -> float:
+        """Simulates typical home usage (Amps)."""
+        # Base: 5A (Lights, TV), Peak: 20A (AC, Kettle)
+        return 8.0 + random.uniform(-1.0, 3.0)
+
 def get_module_load(asset_type: str) -> float:
     """Factory function to get load based on asset type."""
     if asset_type == "Generation":
@@ -105,6 +129,8 @@ def get_module_load(asset_type: str) -> float:
         return TransmissionModule.get_load_profile()
     elif asset_type == "Distribution":
         return DistributionModule.get_load_profile()
+    elif asset_type == "Smart Home":
+        return SmartHomeModule.get_load_profile()
     return 10.0 # Default
 
 # ==========================================
@@ -112,7 +138,8 @@ def get_module_load(asset_type: str) -> float:
 # ==========================================
 
 # Global dictionary to hold current real-time sensor state in memory
-# Key: asset_id, Value: current_real_voltage
+# Key: asset_id (negative for homes to avoid collision or separate dict), Value: current_real_voltage
+# Simplified: We'll use positive IDs for everything, assuming they don't overlap in DB seeding.
 SENSOR_STATE: Dict[int, float] = {}
 
 # Fault Injection State
@@ -124,7 +151,7 @@ def init_db() -> None:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Create table
+    # 1. Grid Assets Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,18 +162,38 @@ def init_db() -> None:
         )
     ''')
     
-    # Check if empty, then seed
+    # 2. Smart Homes Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS smart_homes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            address TEXT NOT NULL,
+            owner TEXT NOT NULL
+        )
+    ''')
+    
+    # Seed Grid Assets
     cursor.execute('SELECT count(*) FROM assets')
     if cursor.fetchone()[0] == 0:
-        print("Seeding database...")
+        print("Seeding Grid Assets...")
         seed_data = [
             ("Kariba Hydro Gen", "Generation", 11000.0, 5.2),      # 11kV Generator
             ("Marvel Substation", "Transmission", 33000.0, 12.5),  # 33kV Substation
             ("Bulawayo Industry Feeder", "Distribution", 400.0, 1.1) # 400V Feeder
         ]
         cursor.executemany('INSERT INTO assets (name, type, rated_voltage, impedance) VALUES (?, ?, ?, ?)', seed_data)
-        conn.commit()
-    
+
+
+    # Seed Smart Homes
+    cursor.execute('SELECT count(*) FROM smart_homes')
+    if cursor.fetchone()[0] == 0:
+        print("Seeding Smart Homes...")
+        # Start ID at 99 to distinct visually in logs, though AUTOINCREMENT handles it.
+        # SQLite autoincrement is separate per table.
+        # We'll just insert and let it be 1.
+        cursor.execute('INSERT INTO smart_homes (address, owner) VALUES (?, ?)', 
+                       ("14 Main St, Bulawayo", "Mr. Dube"))
+        
+    conn.commit()
     conn.close()
 
 def get_db_connection():
@@ -163,47 +210,111 @@ def simulation_worker() -> None:
     while True:
         try:
             conn = get_db_connection()
-            assets = conn.execute('SELECT * FROM assets').fetchall()
+            grid_assets = conn.execute('SELECT * FROM assets').fetchall()
+            homes = conn.execute('SELECT * FROM smart_homes').fetchall()
             conn.close()
 
             current_time = time.time()
 
-            for asset in assets:
-                asset_id = asset['id']
-                rated_v = asset['rated_voltage']
-                
-                # 1. Normal Noise Generation
-                # Fluctuate around Rated Voltage +/- 1%
-                noise = random.uniform(-0.01, 0.01) * rated_v
-                simulated_value = rated_v + noise
+            # --- PROCESS GRID ASSETS ---
+            for asset in grid_assets:
+                sim_step(asset['id'], asset['rated_voltage'], asset['type'], current_time)
 
-                # 2. Apply Load Effect (Physics Lite)
-                load = get_module_load(asset['type'])
-                simulated_value -= (load * 0.05) # Small drop
-
-                # 3. FAULT INJECTION
-                if asset_id in FAULT_STATE:
-                    fault = FAULT_STATE[asset_id]
-                    
-                    # Check if fault has expired
-                    if current_time > fault['end_time']:
-                        del FAULT_STATE[asset_id]
-                        print(f"Fault expired for asset {asset_id}")
-                    else:
-                        f_type = fault['type']
-                        if f_type == "Voltage Dip":
-                             simulated_value = simulated_value * 0.65 # 35% drop
-                        elif f_type == "Voltage Spike":
-                             simulated_value = simulated_value * 1.40 # 40% spike
-                        elif f_type == "Zero Voltage":
-                             simulated_value = 0.0
-
-                SENSOR_STATE[asset_id] = round(simulated_value, 2)
+            # --- PROCESS SMART HOMES ---
+            # Homes are 230V residential standard
+            for home in homes:
+                # We map home IDs to a safe range if needed, but here we'll use a string key prefix or just negative IDs? 
+                # Let's use a composite key approach in memory or just assume IDs don't collide? 
+                # Tables have separate IDs (1, 2, 3...). 
+                # To avoid collision in SENSOR_STATE, we'll prefix keys: "grid_1", "home_1".
+                # Refactor SENSOR_STATE to use string keys.
+                pass 
             
+            # REFACTOR: SENSOR_STATE keys will be strings: "grid_{id}" and "home_{id}"
+            # This requires updating the sim_step function.
+
         except Exception as e:
             print(f"Simulation Error: {e}")
         
         time.sleep(1) # Update every second
+
+def sim_step(db_id: int, rated_v: float, asset_type: str, current_time: float, is_home: bool = False):
+    """Refactored simulation step for any asset."""
+    global SENSOR_STATE, FAULT_STATE
+    
+    key = f"home_{db_id}" if is_home else f"grid_{db_id}"
+    
+    # 1. Normal Noise
+    noise = random.uniform(-0.01, 0.01) * rated_v
+    simulated_value = rated_v + noise
+
+    # 2. Physics / Simulation Logic
+    # Homes have different behavior? For now, similar voltage drop logic
+    load = get_module_load(asset_type)
+    
+    # Voltage drop simulation
+    simulated_value -= (load * 0.05) 
+
+    # 3. FAULT INJECTION
+    if key in FAULT_STATE:
+        fault = FAULT_STATE[key]
+        if current_time > fault['end_time']:
+            del FAULT_STATE[key]
+            print(f"Fault expired for {key}")
+        else:
+            f_type = fault['type']
+            if f_type == "Voltage Dip":
+                 simulated_value = simulated_value * 0.65
+            elif f_type == "Voltage Spike":
+                 simulated_value = simulated_value * 1.40
+            elif f_type == "Zero Voltage":
+                 simulated_value = 0.0
+            
+            # Specific Smart Home Faults
+            elif f_type == "Grid Surge":
+                simulated_value = 265.0 # Trigger Protection
+            elif f_type == "Home Wear":
+                # Voltage normal, but we need to trick the current.
+                # Since this function only returns VOLTAGE, 
+                # we need to store the Fake Load somewhere or calculate it.
+                # Hack: We'll store a "Force Current" flag in SENSOR_STATE?
+                # Better: SENSOR_STATE values become objects: { 'v': float, 'i': float }
+                # For simplicity, we'll just handle voltage here since Current is derived in get_status 
+                # UNLESS we override it.
+                pass # Handled in get_status by checking FAULT_STATE directly
+
+    # Store state
+    # We now store just voltage in simple SENSOR_STATE for backward compat, 
+    # but for homes we might need more. 
+    # Let's stick to Voltage in SENSOR_STATE. 
+    # We will handle "Current Injection" primarily in the read logic (get_status).
+    SENSOR_STATE[key] = round(simulated_value, 2)
+
+def simulation_worker_refactored() -> None:
+    """
+    Main loop for simulation.
+    """
+    print("Starting Main Simulation Loop...")
+    while True:
+        try:
+            conn = get_db_connection()
+            grid_assets = conn.execute('SELECT * FROM assets').fetchall()
+            homes = conn.execute('SELECT * FROM smart_homes').fetchall()
+            conn.close()
+
+            t = time.time()
+
+            # Grid
+            for a in grid_assets:
+                sim_step(a['id'], a['rated_voltage'], a['type'], t, is_home=False)
+            
+            # Homes (Standard 230V)
+            for h in homes:
+                sim_step(h['id'], 230.0, "Smart Home", t, is_home=True)
+                
+        except Exception as e:
+            print(f"Sim Loop Error: {e}")
+        time.sleep(1)
 
 # ==========================================
 # FLASK API ENDPOINTS
@@ -215,95 +326,109 @@ def index():
 
 @app.route('/api/status', methods=['GET'])
 def get_status() -> Any:
-    """
-    Returns the Digital Twin analysis for all assets.
-    """
     conn = get_db_connection()
-    assets = conn.execute('SELECT * FROM assets').fetchall()
+    grid = conn.execute('SELECT * FROM assets').fetchall()
+    homes = conn.execute('SELECT * FROM smart_homes').fetchall()
     conn.close()
 
     response_data: List[Dict[str, Any]] = []
 
-    for asset in assets:
-        asset_id = asset['id']
-        name = asset['name']
-        a_type = asset['type']
+    # 1. Process Grid Assets
+    for asset in grid:
+        key = f"grid_{asset['id']}"
         rated_v = asset['rated_voltage']
-        impedance = asset['impedance']
-
-        # Get Real Sensor Value (Simulated)
-        real_value = SENSOR_STATE.get(asset_id, rated_v)
-
-        # Get Current Load Assumption
-        current_load = get_module_load(a_type)
-
-        # --- DIGITAL TWIN CALCULATION ---
-        expected_value = DigitalTwinModel.calculate_expected_voltage(rated_v, current_load, impedance)
         
-        # --- HEALTH ANALYSIS ---
-        health = DigitalTwinModel.analyze_health(real_value, expected_value)
-        
-        # --- RECOMMENDATION ENGINE ---
-        recommendation = DigitalTwinModel.get_recommendation(real_value, expected_value, health)
+        # Get Sensor Data
+        real_v = SENSOR_STATE.get(key, rated_v)
+        current_load = get_module_load(asset['type'])
+
+        # Analysis
+        expected_v = DigitalTwinModel.calculate_expected_voltage(rated_v, current_load, asset['impedance'])
+        health = DigitalTwinModel.analyze_health(real_v, expected_v)
+        rec = DigitalTwinModel.get_recommendation(real_v, expected_v, health)
 
         response_data.append({
-            "id": asset_id,
-            "name": name,
-            "type": a_type,
-            "real_value": real_value,
-            "expected_value": round(expected_value, 2),
+            "id": key, # Unique UI ID
+            "name": asset['name'],
+            "type": asset['type'],
+            "real_value": real_v,
+            "expected_value": round(expected_v, 2),
             "health_status": health,
             "load_amps": round(current_load, 2),
-            "recommendation": recommendation
+            "recommendation": rec
+        })
+
+    # 2. Process Smart Homes
+    for home in homes:
+        key = f"home_{home['id']}"
+        rated_v = 230.0
+        
+        # Sensor Data
+        real_v = SENSOR_STATE.get(key, rated_v)
+        
+        # Check for Current Injection (Fault Simulation)
+        # If "Home Wear" fault is active, force Current to 18A
+        # Otherwise normal 8A range
+        fault_entry = FAULT_STATE.get(key)
+        if fault_entry and fault_entry['type'] == 'Home Wear':
+             current_load = 18.5 # High current
+        else:
+             current_load = SmartHomeModule.get_load_profile()
+
+        # IoT Logic
+        status, advisory = DigitalTwinModel.analyze_home_iot(real_v, current_load)
+        
+        # Determine Color/Health for UI based on status
+        health_ui = "NORMAL"
+        if status == "PROTECTION ACTIVE": health_ui = "CRITICAL"
+        if status == "WARNING": health_ui = "WARNING"
+
+        response_data.append({
+            "id": key,
+            "name": home['address'], # Display Address
+            "owner": home['owner'],
+            "type": "Smart Home",
+            "real_value": real_v,
+            "expected_value": 230.0, # Nominal
+            "health_status": health_ui,
+            "load_amps": round(current_load, 2),
+            "recommendation": advisory # The IoT Message
         })
 
     return jsonify(response_data)
 
 @app.route('/api/trigger_fault', methods=['POST'])
 def trigger_fault() -> Any:
-    """
-    Admin Endpoint for Fault Injection.
-    Payload: { "asset_id": int, "fault_type": str, "duration": int }
-    """
     data = request.json
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    asset_id = int(data.get('asset_id'))
-    fault_type = data.get('fault_type', 'Voltage Dip')
+    # ID now comes in as integer from new admin console, 
+    # BUT we need to know if it's grid or home.
+    # New Admin Console will send target_type? Or we infer?
+    # Let's update Admin Console to send "grid_1" or "home_1" as ID?
+    # Or keep it simple: "asset_id" (int) and "is_home" (bool).
+    
+    # We'll support both for flexibility.
+    raw_id = data.get('asset_id')
+    fault_type = data.get('fault_type')
     duration = int(data.get('duration', 10))
+    is_home = data.get('is_home', False)
 
-    valid_faults = ["Voltage Dip", "Voltage Spike", "Zero Voltage"]
-    if fault_type not in valid_faults:
-        return jsonify({"error": f"Invalid fault type. Must be one of {valid_faults}"}), 400
+    key = f"home_{raw_id}" if is_home else f"grid_{raw_id}"
 
     # Set fault state
-    FAULT_STATE[asset_id] = {
+    FAULT_STATE[key] = {
         "type": fault_type,
         "end_time": time.time() + duration
     }
 
-    print(f"FAULT INJECTED: Asset {asset_id}, Type {fault_type}, Duration {duration}s")
-    return jsonify({
-        "status": "Fault Injected", 
-        "asset_id": asset_id, 
-        "type": fault_type, 
-        "duration": duration,
-        "message": "Sabotage protocol initiated."
-    })
-
-# ==========================================
-# MAIN ENTRY POINT
-# ==========================================
+    print(f"FAULT INJECTED: {key}, Type {fault_type}, Duration {duration}s")
+    return jsonify({"status": "Fault Injected", "target": key, "message": "Command Sent."})
 
 if __name__ == '__main__':
-    # Initialize DB (run once)
     init_db()
-
-    # Start Simulation Thread
-    sim_thread = threading.Thread(target=simulation_worker, daemon=True)
+    sim_thread = threading.Thread(target=simulation_worker_refactored, daemon=True)
     sim_thread.start()
-
-    # Determine port (default 5000)
-    print("System Online. Digital Twin Engine Active.")
+    print("System Online. IoT Layer Active.")
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False) 

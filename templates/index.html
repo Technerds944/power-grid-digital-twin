@@ -17,6 +17,8 @@
             --warning-color: #ffa500;
             --danger-color: #ff0000;
             --grid-line: #1a1a1a;
+            --home-accent: #00e5ff;
+            /* Cyan for Smart Home */
         }
 
         body {
@@ -54,10 +56,10 @@
             padding: 5px 10px;
         }
 
-        /* GRID LAYOUT */
+        /* GRID LAYOUT - 4 Columns */
         .dashboard-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 15px;
         }
 
@@ -70,6 +72,12 @@
             flex-direction: column;
         }
 
+        /* Distinct Smart Home Look */
+        .scada-panel.smart-home {
+            border: 2px solid var(--home-accent);
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.1);
+        }
+
         .panel-header {
             background-color: #1f1f1f;
             color: white;
@@ -78,6 +86,12 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+
+        .scada-panel.smart-home .panel-header {
+            background-color: #003333;
+            /* Dark Cyan tint */
+            border-bottom: 2px solid var(--home-accent);
         }
 
         .panel-title {
@@ -186,7 +200,7 @@
         .chart-wrapper {
             background-color: #050505;
             border: 1px solid #333;
-            height: 200px;
+            height: 150px;
             margin-top: 15px;
             padding: 5px;
         }
@@ -202,6 +216,7 @@
 
     <div id="dashboard" class="dashboard-grid">
         <!-- Panels injected via JS -->
+        <!-- We expect 4 panels now: Gen, Trans, Dist, Home -->
     </div>
 
     <script>
@@ -209,7 +224,7 @@
         const MAX_POINTS = 50;
         const chartData = {};
 
-        function initChart(canvasId, assetId) {
+        function initChart(canvasId, assetId, assetName) {
             const ctx = document.getElementById(canvasId).getContext('2d');
             chartData[assetId] = { labels: [], real: [], expected: [] };
 
@@ -226,7 +241,7 @@
                     labels: chartData[assetId].labels,
                     datasets: [
                         {
-                            label: 'MODEL EXPECTATION',
+                            label: 'MODEL',
                             borderColor: '#00bcd4', // Cyan
                             borderWidth: 1,
                             borderDash: [4, 4],
@@ -235,13 +250,14 @@
                             fill: false
                         },
                         {
-                            label: 'SENSOR REAL-TIME',
+                            label: 'SENSOR',
                             borderColor: '#00ff00', // Green
                             borderWidth: 2,
                             pointRadius: 0,
                             data: chartData[assetId].real,
                             fill: false,
-                            stepped: true // More industrial look
+                            stepped: false,
+                            tension: 0.3
                         }
                     ]
                 },
@@ -251,13 +267,13 @@
                     animation: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        legend: { labels: { color: '#888', font: { family: 'Courier New' } } }
+                        legend: { display: false } // Clean Look
                     },
                     scales: {
-                        x: { display: false, grid: { color: '#1a1a1a' } },
+                        x: { display: false },
                         y: {
                             grid: { color: '#1a1a1a' },
-                            ticks: { color: '#888', font: { family: 'Courier New' } }
+                            ticks: { color: '#888', font: { family: 'Courier New', size: 10 } }
                         }
                     }
                 }
@@ -281,84 +297,130 @@
                 // Initialize Panels
                 assets.forEach(asset => {
                     const panel = document.createElement('div');
-                    panel.className = 'scada-panel';
-                    panel.innerHTML = `
-                        <div class="panel-header">
-                            <span class="panel-title">${asset.name}</span>
-                            <div class="status-indicator" id="ind-${asset.id}"></div>
-                        </div>
-                        <div class="panel-body">
+
+                    // Distinct class for Smart Home
+                    let isSmartHome = asset.type === 'Smart Home';
+                    panel.className = isSmartHome ? 'scada-panel smart-home' : 'scada-panel';
+
+                    // Smart Home Rendering vs Grid Rendering
+                    let contentHtml = '';
+
+                    if (isSmartHome) {
+                        contentHtml = `
+                            <div class="data-row">
+                                <span class="data-label">ADDRESS</span>
+                                <span class="data-value" style="font-size:0.9rem">${asset.name}</span>
+                            </div>
+                            <div class="data-row">
+                                <span class="data-label">OWNER</span>
+                                <span class="data-value" style="font-size:0.9rem">${asset.owner}</span>
+                            </div>
+                             <div class="data-row">
+                                <span class="data-label">VOLTAGE</span>
+                                <span class="data-value real" id="val-${asset.id}">0.00 V</span>
+                            </div>
+                            <div class="data-row">
+                                <span class="data-label">CURRENT</span>
+                                <span class="data-value" id="load-${asset.id}">0.0 A</span>
+                            </div>
+                        `;
+                    } else {
+                        // Grid Asset
+                        contentHtml = `
                             <div class="data-row">
                                 <span class="data-label">ASSET TYPE</span>
                                 <span class="data-value">${asset.type}</span>
                             </div>
                             <div class="data-row">
                                 <span class="data-label">RATED VOLTAGE</span>
-                                <span class="data-value">${asset.expected_value} V (NOM)</span>
+                                <span class="data-value">${asset.expected_value} V</span>
                             </div>
                             <div class="data-row">
-                                <span class="data-label">REAL-TIME SENSOR</span>
+                                <span class="data-label">SENSOR</span>
                                 <span class="data-value real" id="val-${asset.id}">0.00 V</span>
                             </div>
                             <div class="data-row">
-                                <span class="data-label">TWIN EXPECTED</span>
+                                <span class="data-label">TWIN MODEL</span>
                                 <span class="data-value expected" id="exp-${asset.id}">0.00 V</span>
                             </div>
                              <div class="data-row">
-                                <span class="data-label">CURRENT LOAD</span>
+                                <span class="data-label">LOAD</span>
                                 <span class="data-value" id="load-${asset.id}">0.0 A</span>
                             </div>
+                        `;
+                    }
+
+                    panel.innerHTML = `
+                        <div class="panel-header">
+                            <span class="panel-title">${isSmartHome ? 'SMART HOME LINK' : asset.name}</span>
+                            <div class="status-indicator" id="ind-${asset.id}"></div>
+                        </div>
+                        <div class="panel-body">
+                            ${contentHtml}
 
                             <div class="chart-wrapper">
                                 <canvas id="chart-${asset.id}"></canvas>
                             </div>
 
                             <div class="recommendation-box" id="rec-${asset.id}">
-                                <span class="rec-label">ENGINEERING ADVISORY:</span>
-                                <span id="rec-text-${asset.id}">Initializing...</span>
+                                <span class="rec-label">${isSmartHome ? 'IOT SAFETY ADVISORY' : 'ENGINEERING ADVISORY'}:</span>
+                                <span id="rec-text-${asset.id}">Connecting...</span>
                             </div>
                         </div>
                     `;
                     container.appendChild(panel);
-                    chartInstances[asset.id] = initChart(`chart-${asset.id}`, asset.id);
+                    chartInstances[asset.id] = initChart(`chart-${asset.id}`, asset.id, asset.name);
                 });
             }
 
-            // Update
+            // Update Loop
             assets.forEach(asset => {
-                // Values
-                document.getElementById(`val-${asset.id}`).textContent = asset.real_value.toFixed(2) + " V";
-                document.getElementById(`exp-${asset.id}`).textContent = asset.expected_value.toFixed(2) + " V";
-                document.getElementById(`load-${asset.id}`).textContent = asset.load_amps.toFixed(1) + " A";
+                // IDs might need text escaping if they have spaces, but ours are "grid_1", "home_1" safe.
+                try {
+                    // Update Values
+                    document.getElementById(`val-${asset.id}`).textContent = asset.real_value.toFixed(2) + " V";
+                    document.getElementById(`load-${asset.id}`).textContent = asset.load_amps.toFixed(1) + " A";
 
-                // Indicators & Styles
-                const ind = document.getElementById(`ind-${asset.id}`);
-                const recBox = document.getElementById(`rec-${asset.id}`);
-                const recText = document.getElementById(`rec-text-${asset.id}`);
+                    if (asset.type !== 'Smart Home') {
+                        document.getElementById(`exp-${asset.id}`).textContent = asset.expected_value.toFixed(2) + " V";
+                    }
 
-                ind.className = `status-indicator ${asset.health_status}`;
-                recBox.className = `recommendation-box ${asset.health_status}`;
-                recText.textContent = asset.recommendation.toUpperCase();
+                    // Indicators & Styles
+                    const ind = document.getElementById(`ind-${asset.id}`);
+                    const recBox = document.getElementById(`rec-${asset.id}`);
+                    const recText = document.getElementById(`rec-text-${asset.id}`);
 
-                // Chart
-                const chart = chartInstances[asset.id];
-                const cData = chartData[asset.id];
+                    // Map health status to CSS class
+                    // "PROTECTION ACTIVE" -> CRITICAL style
+                    let cssHealth = asset.health_status;
+                    if (cssHealth === "PROTECTION ACTIVE") cssHealth = "CRITICAL";
 
-                cData.real.push(asset.real_value);
-                cData.expected.push(asset.expected_value);
-                cData.real.shift();
-                cData.expected.shift();
+                    ind.className = `status-indicator ${cssHealth}`;
+                    recBox.className = `recommendation-box ${cssHealth}`;
+                    recText.textContent = asset.recommendation.toUpperCase();
 
-                // Color overrides
-                if (asset.health_status === 'CRITICAL') {
-                    chart.data.datasets[1].borderColor = '#ff0000'; // Red
-                } else if (asset.health_status === 'WARNING') {
-                    chart.data.datasets[1].borderColor = '#ffa500'; // Orange
-                } else {
-                    chart.data.datasets[1].borderColor = '#00ff00'; // Green
+                    // Chart
+                    const chart = chartInstances[asset.id];
+                    const cData = chartData[asset.id];
+
+                    cData.real.push(asset.real_value);
+                    cData.expected.push(asset.expected_value);
+                    cData.real.shift();
+                    cData.expected.shift();
+
+                    // Color overrides for chart line
+                    if (cssHealth === 'CRITICAL') {
+                        chart.data.datasets[1].borderColor = '#ff0000'; // Red
+                    } else if (cssHealth === 'WARNING') {
+                        chart.data.datasets[1].borderColor = '#ffa500'; // Orange
+                    } else {
+                        chart.data.datasets[1].borderColor = '#00ff00'; // Green
+                    }
+
+                    chart.update();
+                } catch (e) {
+                    console.warn("Update Error for " + asset.id, e);
                 }
-
-                chart.update();
             });
         }
 
